@@ -1,4 +1,4 @@
-aiogram==3.3.0
-SQLAlchemy==2.0.23
-python-dotenv==1.0.1
-sqlite-utils==3.36
+aiogram==3.5.0
+SQLAlchemy==2.0.21
+pydantic==2.7.1
+python-dotenv==1.0.0
