@@ -1,8 +1,4 @@
-aiogram==3.5.0
-fastapi==0.110.0
-uvicorn==0.27.1
-SQLAlchemy==2.0.25
+aiogram==3.3.0
+SQLAlchemy==2.0.23
 python-dotenv==1.0.1
-httpx==0.26.0
-APScheduler==3.10.4
-pydantic==2.7.1
+sqlite-utils==3.36
