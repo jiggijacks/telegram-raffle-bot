@@ -1,4 +1,4 @@
-aiogram
-SQLAlchemy
-pydantic
+aiogram==3.3.0
+SQLAlchemy==2.0.20
+aiosqlite
 python-dotenv
