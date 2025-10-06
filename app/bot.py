@@ -1,15 +1,14 @@
 import os
-print("ENV CHECK:", os.getenv("BOT_TOKEN"), os.getenv("DATABASE_URL"))
+import asyncio
 import logging
 import requests
-from aiogram import Bot, Dispatcher, Router, F
-from aiogram.types import Message
+from datetime import datetime, timedelta
+from aiogram import Bot, Dispatcher, types, F
 from aiogram.enums import ParseMode
-from aiogram.filters import CommandStart, Command
-from aiogram.client.default import DefaultBotProperties
-from sqlalchemy.ext.asyncio import AsyncSession
+from aiogram.filters import Command
+from aiogram.types import Message
+
 from app.database import (
-    async_session,
     init_db,
     get_or_create_user,
     add_ticket,
@@ -17,15 +16,9 @@ from app.database import (
     get_all_participants,
 )
 
-# ==================================================
-# Logging setup
-# ==================================================
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# ==================================================
-# Environment variables
-# ==================================================
+# =====================================================
+# CONFIG
+# =====================================================
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 PAYSTACK_SECRET_KEY = os.getenv("PAYSTACK_SECRET_KEY")
 ADMIN_ID = os.getenv("ADMIN_ID")
@@ -33,127 +26,121 @@ ADMIN_ID = os.getenv("ADMIN_ID")
 if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN is required in environment")
 
-# ==================================================
-# Bot and Dispatcher
-# ==================================================
-bot = Bot(
-    token=BOT_TOKEN,
-    default=DefaultBotProperties(parse_mode=ParseMode.HTML),
-)
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+bot = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML)
 dp = Dispatcher()
-router = Router()
 
-# ==================================================
-# Helper: Create Paystack payment link
-# ==================================================
-def create_paystack_payment(email: str, amount_kobo: int):
-    try:
-        headers = {
-            "Authorization": f"Bearer {PAYSTACK_SECRET_KEY}",
-            "Content-Type": "application/json",
-        }
-        data = {"email": email, "amount": amount_kobo}
-        response = requests.post("https://api.paystack.co/transaction/initialize", json=data, headers=headers)
-        res_json = response.json()
-        if res_json.get("status"):
-            return res_json["data"]["authorization_url"]
-        else:
-            return None
-    except Exception as e:
-        logger.error(f"Paystack error: {e}")
-        return None
 
-# ==================================================
-# Command Handlers
-# ==================================================
-@router.message(CommandStart())
+# =====================================================
+# HANDLERS
+# =====================================================
+@dp.message(Command("start"))
 async def cmd_start(message: Message):
-    """Welcome message"""
+    """Welcome new users."""
+    user = await get_or_create_user(message.from_user.id, message.from_user.full_name)
     text = (
-        f"🎉 Welcome to <b>MegaWin Raffle!</b>\n\n"
-        f"Join the excitement — buy raffle tickets for a chance to win amazing prizes!\n\n"
-        f"Commands:\n"
-        f"🎟️ /buy — Purchase raffle tickets\n"
-        f"🎫 /tickets — View your tickets\n"
-        f"ℹ️ /help — Learn how it works\n\n"
-        f"Good luck, {message.from_user.first_name}! 🍀"
+        f"🎉 Welcome <b>{message.from_user.full_name}</b> to <b>MegaWin Raffle!</b>\n\n"
+        "Buy tickets to enter today's draw and stand a chance to win amazing prizes! 🏆\n\n"
+        "🪙 Each ticket costs ₦500.\n"
+        "📅 Winners are announced daily.\n\n"
+        "Use /buy to purchase tickets or /tickets to check your entries."
     )
-
-    async with async_session() as db:
-        await get_or_create_user(db, message.from_user)
-
     await message.answer(text)
 
 
-@router.message(Command("help"))
-async def cmd_help(message: Message):
-    """Help command"""
-    help_text = (
-        "📘 <b>How it works</b>\n"
-        "1️⃣ Use /buy to get a ticket (₦500 each).\n"
-        "2️⃣ Each ticket increases your chances to win.\n"
-        "3️⃣ Winners are randomly selected weekly.\n"
-        "4️⃣ View your tickets anytime with /tickets.\n\n"
-        "🧾 Payments are processed securely via Paystack."
-    )
-    await message.answer(help_text)
-
-
-@router.message(Command("buy"))
+@dp.message(Command("buy"))
 async def cmd_buy(message: Message):
-    """Buy raffle ticket"""
-    email = f"user_{message.from_user.id}@example.com"
-    amount_kobo = 500 * 100  # ₦500 in Kobo
+    """Initialize Paystack payment."""
+    amount = 500 * 100  # 500 NGN
+    headers = {
+        "Authorization": f"Bearer {PAYSTACK_SECRET_KEY}",
+        "Content-Type": "application/json",
+    }
 
-    link = create_paystack_payment(email, amount_kobo)
-    if not link:
-        await message.answer("⚠️ Could not generate Paystack link. Please try again later.")
-        return
+    data = {
+        "email": f"user{message.from_user.id}@megawinraffle.com",
+        "amount": amount,
+        "callback_url": "https://your-callback-url.com/verify",
+    }
 
-    await message.answer(
-        f"💳 Click below to complete your payment:\n\n<a href='{link}'>Pay ₦500 via Paystack</a>",
-        disable_web_page_preview=True,
-    )
+    response = requests.post("https://api.paystack.co/transaction/initialize", json=data, headers=headers)
+
+    if response.status_code == 200:
+        auth_url = response.json()["data"]["authorization_url"]
+        ref = response.json()["data"]["reference"]
+        await message.answer(
+            f"💳 Click below to complete your payment:\n👉 <a href='{auth_url}'>Pay ₦500 via Paystack</a>\n\n"
+            f"Once paid, your ticket will be automatically added. ✅",
+            disable_web_page_preview=True,
+        )
+        logger.info(f"User {message.from_user.id} initialized payment with ref {ref}")
+    else:
+        await message.answer("❌ Payment initialization failed. Try again later.")
 
 
-@router.message(Command("tickets"))
+@dp.message(Command("tickets"))
 async def cmd_tickets(message: Message):
-    """View your raffle tickets"""
-    async with async_session() as db:
-        tickets = await get_user_tickets(db, message.from_user.id)
-
+    """Show user tickets."""
+    user = await get_or_create_user(message.from_user.id, message.from_user.full_name)
+    tickets = await get_user_tickets(user.id)
     count = len(tickets)
+
     if count == 0:
-        await message.answer("🎟️ You have no tickets yet. Use /buy to get one!")
+        await message.answer("🎫 You don't have any tickets yet.\nUse /buy to get one!")
     else:
-        await message.answer(f"🎉 You have <b>{count}</b> raffle ticket(s)! Good luck!")
+        await message.answer(f"🎟 You currently have <b>{count}</b> tickets in the draw. Good luck! 🍀")
 
 
-@router.message(Command("participants"))
-async def cmd_participants(message: Message):
-    """Admin-only command to view all participants"""
-    if str(message.from_user.id) != str(ADMIN_ID):
-        await message.answer("⛔ You are not authorized to use this command.")
+# =====================================================
+# DAILY WINNER (AUTO OR ADMIN TRIGGER)
+# =====================================================
+async def pick_daily_winner():
+    """Pick a random winner every 24 hours."""
+    from random import choice
+    participants = await get_all_participants()
+    if not participants:
+        logger.info("No participants today.")
         return
 
-    async with async_session() as db:
-        users = await get_all_participants(db)
+    winner = choice(participants)
+    winner_id = winner.telegram_id
 
-    if not users:
-        await message.answer("No participants yet.")
-    else:
-        user_list = "\n".join([f"• {u.full_name or u.username or 'User'}" for u in users])
-        await message.answer(f"👥 <b>Participants</b>:\n{user_list}")
+    try:
+        await bot.send_message(
+            winner_id,
+            "🎉 Congratulations! You've been selected as today's MegaWin Raffle winner! 🏆",
+        )
+        await bot.send_message(
+            ADMIN_ID,
+            f"🏁 Daily Winner: {winner.full_name} (@{winner.telegram_id})",
+        )
+        logger.info(f"Winner selected: {winner.full_name} ({winner.telegram_id})")
+    except Exception as e:
+        logger.error(f"Error sending winner message: {e}")
 
-# ==================================================
-# Startup and Polling
-# ==================================================
+
+async def daily_task_scheduler():
+    """Run winner picker every 24 hours."""
+    while True:
+        now = datetime.now()
+        target = datetime.combine(now.date(), datetime.min.time()) + timedelta(days=1)
+        wait_time = (target - now).total_seconds()
+        logger.info(f"Next draw in {wait_time / 3600:.1f} hours...")
+        await asyncio.sleep(wait_time)
+        await pick_daily_winner()
+
+
+# =====================================================
+# RUN
+# =====================================================
 async def main():
-    await init_db()
-    dp.include_router(router)
     logger.info("🎯 Starting MegaWin Raffle Bot...")
+    await init_db()
+    asyncio.create_task(daily_task_scheduler())
     await dp.start_polling(bot)
 
+
 if __name__ == "__main__":
-    import asyncio
     asyncio.run(main())
