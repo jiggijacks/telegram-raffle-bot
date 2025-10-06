@@ -1,4 +1,5 @@
 import os
+print("ENV CHECK:", os.getenv("BOT_TOKEN"), os.getenv("DATABASE_URL"))
 import logging
 import requests
 from aiogram import Bot, Dispatcher, Router, F
