@@ -1,87 +1,98 @@
 import os
-from sqlalchemy import Column, Integer, String, ForeignKey, select
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import declarative_base, sessionmaker, relationship
+import asyncio
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, func
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 
-# ==================================================
-# Database setup
-# ==================================================
+# =====================================================
+# Database configuration
+# =====================================================
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./raffle.db")
 
-# Create async engine and session
-engine = create_async_engine(DATABASE_URL, echo=False)
-async_session = sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
-
 Base = declarative_base()
+engine = create_async_engine(DATABASE_URL, echo=False, future=True)
+async_session = sessionmaker(
+    bind=engine, class_=AsyncSession, expire_on_commit=False
+)
 
-# ==================================================
-# Models
-# ==================================================
+
+# =====================================================
+# MODELS
+# =====================================================
 class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
     telegram_id = Column(Integer, unique=True, index=True)
-    username = Column(String, nullable=True)
-    full_name = Column(String, nullable=True)
-    tickets = relationship("Ticket", back_populates="user")
+    full_name = Column(String)
+    tickets = relationship("Ticket", back_populates="owner")
+
 
 class Ticket(Base):
     __tablename__ = "tickets"
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"))
-    user = relationship("User", back_populates="tickets")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
-# ==================================================
-# Initialize database
-# ==================================================
+    owner = relationship("User", back_populates="tickets")
+
+
+# =====================================================
+# INITIALIZATION
+# =====================================================
 async def init_db():
-    """Create all tables when bot starts."""
+    """Initialize database (create tables if not exist)."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-# ==================================================
-# Utility functions
-# ==================================================
-async def get_or_create_user(db: AsyncSession, telegram_user):
-    result = await db.execute(select(User).filter(User.telegram_id == telegram_user.id))
-    user = result.scalar_one_or_none()
 
-    if not user:
-        user = User(
-            telegram_id=telegram_user.id,
-            username=telegram_user.username,
-            full_name=telegram_user.full_name
+# =====================================================
+# HELPERS
+# =====================================================
+async def get_or_create_user(telegram_id: int, full_name: str):
+    async with async_session() as session:
+        result = await session.execute(
+            User.__table__.select().where(User.telegram_id == telegram_id)
         )
-        db.add(user)
-        await db.commit()
-        await db.refresh(user)
-    return user
+        user = result.scalar_one_or_none()
 
-async def add_ticket(db: AsyncSession, telegram_id: int):
-    result = await db.execute(select(User).filter(User.telegram_id == telegram_id))
-    user = result.scalar_one_or_none()
+        if not user:
+            user = User(telegram_id=telegram_id, full_name=full_name)
+            session.add(user)
+            await session.commit()
+            await session.refresh(user)
 
-    if user:
-        ticket = Ticket(user_id=user.id)
-        db.add(ticket)
-        await db.commit()
-        await db.refresh(ticket)
+        return user
+
+
+async def add_ticket(user_id: int):
+    async with async_session() as session:
+        ticket = Ticket(user_id=user_id)
+        session.add(ticket)
+        await session.commit()
         return ticket
-    return None
 
-async def get_user_tickets(db: AsyncSession, telegram_id: int):
-    result = await db.execute(select(User).filter(User.telegram_id == telegram_id))
-    user = result.scalar_one_or_none()
 
-    if not user:
-        return []
+async def get_user_tickets(user_id: int):
+    async with async_session() as session:
+        result = await session.execute(
+            Ticket.__table__.select().where(Ticket.user_id == user_id)
+        )
+        tickets = result.fetchall()
+        return tickets
 
-    result = await db.execute(select(Ticket).filter(Ticket.user_id == user.id))
-    tickets = result.scalars().all()
-    return tickets
 
-async def get_all_participants(db: AsyncSession):
-    result = await db.execute(select(User))
-    return result.scalars().all()
+async def get_all_participants():
+    async with async_session() as session:
+        result = await session.execute(User.__table__.select())
+        users = result.fetchall()
+        return users
+
+
+# =====================================================
+# TEST (optional)
+# =====================================================
+if __name__ == "__main__":
+    asyncio.run(init_db())
+    print("✅ Database initialized successfully.")
