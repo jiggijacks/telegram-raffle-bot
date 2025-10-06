@@ -1,219 +1,176 @@
 import os
 import logging
-from dotenv import load_dotenv
-from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message
+import requests
+from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
-
-from app.database import (
-    SessionLocal,
-    get_or_create_user,
-    add_ticket,
-    get_user_tickets,
-    get_all_participants,
-)
+from aiogram.enums import ParseMode
+from dotenv import load_dotenv
+from app.database import SessionLocal, get_or_create_user, add_ticket, get_user_tickets, get_all_participants
 
 # Load environment variables
 load_dotenv()
 
-TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+# Telegram bot info
+BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID"))
-CHANNEL_ID = int(os.getenv("CHANNEL_ID"))
+CHANNEL_ID = os.getenv("CHANNEL_ID")
 
-if not TOKEN:
-    raise RuntimeError("TELEGRAM_BOT_TOKEN is missing in .env")
+# Paystack credentials
+PAYSTACK_SECRET_KEY = os.getenv("PAYSTACK_SECRET_KEY")
+PAYSTACK_BASE_URL = os.getenv("PAYSTACK_BASE_URL", "https://api.paystack.co")
 
-# Setup logging
+# Initialize bot
 logging.basicConfig(level=logging.INFO)
-
-# Bot and Dispatcher
-bot = Bot(token=TOKEN, parse_mode="Markdown")
+bot = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML)
 dp = Dispatcher()
 
-
-# -------------------------
-# User Commands
-# -------------------------
+# ------------------- COMMAND HANDLERS -------------------
 
 @dp.message(Command("start"))
-async def cmd_start(message: Message):
-    """Welcome message + registration in DB"""
+async def cmd_start(message: types.Message):
     db = SessionLocal()
     get_or_create_user(db, message.from_user)
+    db.close()
 
-    text = (
-        f"🎉 *Welcome to MegaWin Raffle!* 🎉\n\n"
-        f"Hi *{message.from_user.full_name}* 👋\n\n"
-        f"Here you can:\n"
-        f"🎟 Buy raffle tickets\n"
-        f"📊 Check your tickets\n"
-        f"🏆 Wait for the admin to pick lucky winners!\n\n"
-        f"👉 To buy a ticket, type /buy\n"
-        f"👉 To see your tickets, type /tickets\n"
-        f"👉 For commands, type /help\n"
+    welcome_text = (
+        f"🎉 Welcome <b>{message.from_user.full_name}</b> to <b>MegaWin Raffle!</b>\n\n"
+        "Buy raffle tickets to stand a chance of winning amazing prizes every week!\n\n"
+        "✨ Commands:\n"
+        "• /buy - Purchase raffle tickets\n"
+        "• /tickets - View your tickets\n"
+        "• /verify <reference> - Confirm your payment\n"
+        "• /help - See all commands again\n\n"
+        "Good luck! 🍀"
     )
-    await message.answer(text)
-
-
-@dp.message(Command("buy"))
-async def cmd_buy(message: Message):
-    """Simulate buying a ticket (adds to DB)"""
-    db = SessionLocal()
-    user = get_or_create_user(db, message.from_user)
-    add_ticket(db, user)
-
-    await message.answer("✅ Your raffle ticket has been added! 🎟\nGood luck 🍀")
-
-
-@dp.message(Command("tickets"))
-async def cmd_tickets(message: Message):
-    """Show all tickets owned by the user"""
-    db = SessionLocal()
-    user = get_or_create_user(db, message.from_user)
-    tickets = get_user_tickets(db, user)
-
-    if tickets:
-        await message.answer(
-            f"🎟 You have *{len(tickets)}* tickets:\n" +
-            ", ".join([str(t.id) for t in tickets])
-        )
-    else:
-        await message.answer("😕 You don’t have any tickets yet. Type /buy to get one.")
+    await message.answer(welcome_text)
 
 
 @dp.message(Command("help"))
-async def cmd_help(message: Message):
-    """Show available commands"""
-    if message.from_user.id == ADMIN_ID:
-        text = (
-            "🤖 *MegaWin Raffle Bot Help*\n\n"
-            "👤 *User Commands:*\n"
-            "/start - Start the bot & register\n"
-            "/buy - Buy a raffle ticket\n"
-            "/tickets - View your tickets\n"
-            "/help - Show this help message\n\n"
-            "🛠️ *Admin Commands:*\n"
-            "/participants - List all participants\n"
-            "/select_winner - Show participants to select a winner\n"
-            "/winner <id> - Announce a winner\n"
-            "/broadcast <msg> - Send a message to all users\n"
+async def cmd_help(message: types.Message):
+    help_text = (
+        "🆘 <b>Raffle Bot Help</b>\n\n"
+        "Here are the commands you can use:\n"
+        "• /buy - Purchase raffle tickets\n"
+        "• /verify <reference> - Verify payment & get your ticket\n"
+        "• /tickets - See how many tickets you have\n"
+        "• /select_winner - (Admin only) Choose a winner\n"
+        "• /announce - (Admin only) Announce in channel"
+    )
+    await message.answer(help_text)
+
+
+@dp.message(Command("buy"))
+async def cmd_buy(message: types.Message):
+    """Start a Paystack payment"""
+    amount = 500 * 100  # ₦500 in kobo
+    email = f"user{message.from_user.id}@example.com"  # test email
+
+    headers = {
+        "Authorization": f"Bearer {PAYSTACK_SECRET_KEY}",
+        "Content-Type": "application/json",
+    }
+
+    data = {
+        "email": email,
+        "amount": amount,
+        "callback_url": "https://example.com/paystack/webhook",  # optional
+        "metadata": {"telegram_id": message.from_user.id},
+    }
+
+    response = requests.post(f"{PAYSTACK_BASE_URL}/transaction/initialize", headers=headers, json=data)
+
+    if response.status_code == 200:
+        payment_data = response.json()
+        pay_url = payment_data["data"]["authorization_url"]
+        await message.answer(
+            f"💳 Click below to complete your payment:\n\n"
+            f"👉 <a href='{pay_url}'>Pay ₦500 via Paystack</a>\n\n"
+            f"After payment, send the reference using:\n"
+            f"<code>/verify your_reference_here</code>",
+            parse_mode="HTML"
         )
     else:
-        text = (
-            "🤖 *MegaWin Raffle Bot Help*\n\n"
-            "👤 *User Commands:*\n"
-            "/start - Start the bot & register\n"
-            "/buy - Buy a raffle ticket\n"
-            "/tickets - View your tickets\n"
-            "/help - Show this help message\n"
-        )
-
-    await message.answer(text)
+        await message.answer("⚠️ Error connecting to Paystack. Please try again later.")
 
 
-# -------------------------
-# Admin-only commands
-# -------------------------
-
-@dp.message(Command("participants"))
-async def cmd_participants(message: Message):
-    """Admin: see all participants"""
-    if message.from_user.id != ADMIN_ID:
+@dp.message(Command("verify"))
+async def cmd_verify(message: types.Message):
+    """Verify Paystack payment"""
+    parts = message.text.split()
+    if len(parts) != 2:
+        await message.answer("Usage: /verify <reference>")
         return
 
+    reference = parts[1]
+    headers = {"Authorization": f"Bearer {PAYSTACK_SECRET_KEY}"}
+
+    response = requests.get(f"{PAYSTACK_BASE_URL}/transaction/verify/{reference}", headers=headers)
+    data = response.json()
+
+    if response.status_code == 200 and data["data"]["status"] == "success":
+        db = SessionLocal()
+        user = get_or_create_user(db, message.from_user)
+        add_ticket(db, user)
+        db.close()
+        await message.answer("✅ Payment verified successfully! 1 ticket added to your account.")
+    else:
+        await message.answer("❌ Payment not verified. Please check your reference and try again.")
+
+
+@dp.message(Command("tickets"))
+async def cmd_tickets(message: types.Message):
+    """Show how many tickets the user has"""
     db = SessionLocal()
-    users = get_all_participants(db)
-    if not users:
-        await message.answer("No participants yet.")
-        return
-
-    text = "👥 *Participants:*\n"
-    for u in users:
-        text += f"- {u.full_name} (@{u.username}) — {len(u.tickets)} tickets\n"
-
-    await message.answer(text)
+    user = get_or_create_user(db, message.from_user)
+    ticket_count = get_user_tickets(db, user)
+    db.close()
+    await message.answer(f"🎟 You currently have <b>{ticket_count}</b> raffle ticket(s).")
 
 
 @dp.message(Command("select_winner"))
-async def cmd_select_winner(message: Message):
-    """Admin: manually select a winner"""
+async def cmd_select_winner(message: types.Message):
+    """Admin manually selects a winner"""
     if message.from_user.id != ADMIN_ID:
+        await message.answer("⚠️ You don’t have permission to do that.")
         return
 
     db = SessionLocal()
-    users = get_all_participants(db)
-    if not users:
-        await message.answer("No participants to select from.")
+    participants = get_all_participants(db)
+    db.close()
+
+    if not participants:
+        await message.answer("No participants yet.")
         return
 
-    text = "🏆 *Select a Winner by ID:*\n"
-    for u in users:
-        text += f"- `{u.id}` {u.full_name} (@{u.username}) — {len(u.tickets)} tickets\n"
-
-    text += "\n👉 Reply with `/winner <id>` to select the winner."
-    await message.answer(text)
+    participant_list = "\n".join([f"{p.full_name} (@{p.username or 'NoUsername'})" for p in participants])
+    await message.answer(f"🎯 <b>All Participants:</b>\n{participant_list}\n\nReply with the name of the winner you choose.")
+    # You can add logic to manually record admin’s winner choice later.
 
 
-@dp.message(Command("winner"))
-async def cmd_winner(message: Message):
-    """Admin: confirm a winner by user ID"""
+@dp.message(Command("announce"))
+async def cmd_announce(message: types.Message):
+    """Admin sends a message to the raffle channel"""
     if message.from_user.id != ADMIN_ID:
+        await message.answer("⚠️ Only the admin can use this command.")
         return
 
-    try:
-        user_id = int(message.text.split(" ")[1])
-    except (IndexError, ValueError):
-        await message.answer("⚠️ Usage: `/winner <id>`")
-        return
-
-    db = SessionLocal()
-    users = get_all_participants(db)
-    winner = next((u for u in users if u.id == user_id), None)
-
-    if not winner:
-        await message.answer("❌ No user found with that ID.")
-        return
-
-    # Announce in channel
-    await bot.send_message(
-        chat_id=CHANNEL_ID,
-        text=f"🥳 Congratulations *{winner.full_name}* (@{winner.username})!\n"
-             f"You are the WINNER of this raffle! 🎉🎟"
-    )
-    await message.answer("✅ Winner has been announced.")
-
-
-@dp.message(Command("broadcast"))
-async def cmd_broadcast(message: Message):
-    """Admin: broadcast a message to all participants"""
-    if message.from_user.id != ADMIN_ID:
-        return
-
-    db = SessionLocal()
-    users = get_all_participants(db)
-
-    text = message.text.replace("/broadcast", "").strip()
+    text = message.text.replace("/announce", "").strip()
     if not text:
-        await message.answer("⚠️ Usage: `/broadcast <message>`")
+        await message.answer("Usage: /announce <message>")
         return
 
-    for u in users:
-        try:
-            await bot.send_message(chat_id=u.telegram_id, text=f"📢 {text}")
-        except Exception as e:
-            logging.warning(f"Could not send message to {u.telegram_id}: {e}")
-
-    await message.answer("✅ Broadcast sent to all participants.")
+    await bot.send_message(CHANNEL_ID, f"📢 Announcement:\n\n{text}")
+    await message.answer("✅ Message sent to the raffle channel.")
 
 
-# -------------------------
-# Run Bot
-# -------------------------
-
-async def main():
-    await dp.start_polling(bot)
-
+# ------------------- RUN BOT -------------------
 
 if __name__ == "__main__":
+    logging.info("Starting MegaWin Raffle Bot...")
     import asyncio
+    from aiogram import executor
+
+    async def main():
+        await dp.start_polling(bot)
+
     asyncio.run(main())
