@@ -1,17 +1,22 @@
-from sqlalchemy import Column, Integer, String, ForeignKey, create_engine
+import os
+from sqlalchemy import Column, Integer, String, ForeignKey, select
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 
+# ==================================================
 # Database setup
-DATABASE_URL = "sqlite:///raffle.db"
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
-SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+# ==================================================
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./raffle.db")
+
+# Create async engine and session
+engine = create_async_engine(DATABASE_URL, echo=False)
+async_session = sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
+
 Base = declarative_base()
 
-
-# -------------------------
+# ==================================================
 # Models
-# -------------------------
-
+# ==================================================
 class User(Base):
     __tablename__ = "users"
 
@@ -19,66 +24,64 @@ class User(Base):
     telegram_id = Column(Integer, unique=True, index=True)
     username = Column(String, nullable=True)
     full_name = Column(String, nullable=True)
-
-    tickets = relationship("Ticket", back_populates="owner")
-
+    tickets = relationship("Ticket", back_populates="user")
 
 class Ticket(Base):
     __tablename__ = "tickets"
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"))
+    user = relationship("User", back_populates="tickets")
 
-    owner = relationship("User", back_populates="tickets")
+# ==================================================
+# Initialize database
+# ==================================================
+async def init_db():
+    """Create all tables when bot starts."""
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
 
+# ==================================================
+# Utility functions
+# ==================================================
+async def get_or_create_user(db: AsyncSession, telegram_user):
+    result = await db.execute(select(User).filter(User.telegram_id == telegram_user.id))
+    user = result.scalar_one_or_none()
 
-# -------------------------
-# Database Helpers
-# -------------------------
-
-def init_db():
-    """Create tables if they don’t exist"""
-    Base.metadata.create_all(bind=engine)
-
-
-def get_or_create_user(db, telegram_user):
-    """Find or create a User entry"""
-    user = db.query(User).filter(User.telegram_id == telegram_user.id).first()
     if not user:
         user = User(
             telegram_id=telegram_user.id,
             username=telegram_user.username,
-            full_name=telegram_user.full_name,
+            full_name=telegram_user.full_name
         )
         db.add(user)
-        db.commit()
-        db.refresh(user)
+        await db.commit()
+        await db.refresh(user)
     return user
 
+async def add_ticket(db: AsyncSession, telegram_id: int):
+    result = await db.execute(select(User).filter(User.telegram_id == telegram_id))
+    user = result.scalar_one_or_none()
 
-def add_ticket(db, user: User):
-    """Assign a new raffle ticket to a user"""
-    ticket = Ticket(owner=user)
-    db.add(ticket)
-    db.commit()
-    db.refresh(ticket)
-    return ticket
+    if user:
+        ticket = Ticket(user_id=user.id)
+        db.add(ticket)
+        await db.commit()
+        await db.refresh(ticket)
+        return ticket
+    return None
 
+async def get_user_tickets(db: AsyncSession, telegram_id: int):
+    result = await db.execute(select(User).filter(User.telegram_id == telegram_id))
+    user = result.scalar_one_or_none()
 
-def get_user_tickets(db, user: User):
-    """Return all tickets belonging to a user"""
-    return db.query(Ticket).filter(Ticket.user_id == user.id).all()
+    if not user:
+        return []
 
+    result = await db.execute(select(Ticket).filter(Ticket.user_id == user.id))
+    tickets = result.scalars().all()
+    return tickets
 
-def get_all_participants(db):
-    """Return all users who have tickets"""
-    return db.query(User).filter(User.tickets.any()).all()
-
-
-# -------------------------
-# Run directly for setup
-# -------------------------
-
-if __name__ == "__main__":
-    init_db()
-    print("✅ Database initialized (raffle.db created/updated).")
+async def get_all_participants(db: AsyncSession):
+    result = await db.execute(select(User))
+    return result.scalars().all()
