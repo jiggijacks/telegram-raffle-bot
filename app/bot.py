@@ -2,13 +2,10 @@ import os
 import logging
 from fastapi import FastAPI, Request
 from aiogram import Bot, Dispatcher, types
-from aiogram.utils.executor import start_webhook  # <-- Ensure we're using webhook, not polling
-from aiogram.enums import ParseMode
-from aiogram.filters import Command
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import sessionmaker
-from app.database import Base, RaffleEntry
+from aiogram.types import Update
+from aiogram import F
 from dotenv import load_dotenv
+from aiogram.webhook.aiohttp import webhook
 
 # -----------------------------
 # Load environment variables
@@ -33,8 +30,9 @@ logger = logging.getLogger(__name__)
 # -----------------------------
 # Initialize Telegram Bot + FastAPI
 # -----------------------------
-bot = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML)
+bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
+
 app = FastAPI()
 
 # -----------------------------
