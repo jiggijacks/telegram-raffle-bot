@@ -158,25 +158,36 @@ async def verify_paystack_payment(request: Request):
         user_id = data.get("metadata", {}).get("user_id")
         reference = data.get("reference")
 
-        if not user_id:
-            logger.warning("⚠️ Webhook missing user_id metadata.")
+        if not user_id or not reference:
+            logger.warning("⚠️ Webhook missing user_id or reference.")
             return {"status": "error"}
 
-        async with async_session() as session:
-            entry = RaffleEntry(user_id=user_id, payment_ref=reference)
-            session.add(entry)
-            await session.commit()
+        # Verify payment reference with Paystack API
+        async with aiohttp.ClientSession() as session:
+            url = f"https://api.paystack.co/transaction/verify/{reference}"
+            headers = {"Authorization": f"Bearer {PAYSTACK_SECRET_KEY}"}
+            async with session.get(url, headers=headers) as resp:
+                verification_response = await resp.json()
+                if verification_response.get("status") == "success" and verification_response["data"]["status"] == "success":
+                    # Payment verified, proceed with saving the ticket
+                    async with async_session() as session:
+                        entry = RaffleEntry(user_id=user_id, payment_ref=reference)
+                        session.add(entry)
+                        await session.commit()
 
-        # Notify user on Telegram
-        try:
-            await bot.send_message(
-                chat_id=user_id,
-                text="✅ Payment confirmed! Your raffle ticket has been added. Good luck! 🍀",
-            )
-        except Exception as e:
-            logger.error(f"❌ Failed to message user {user_id}: {e}")
+                    # Notify user on Telegram
+                    try:
+                        await bot.send_message(
+                            chat_id=user_id,
+                            text="✅ Payment confirmed! Your raffle ticket has been added. Good luck! 🍀",
+                        )
+                    except Exception as e:
+                        logger.error(f"❌ Failed to message user {user_id}: {e}")
+                else:
+                    logger.warning(f"Payment reference {reference} verification failed.")
 
     return {"status": "ok"}
+
 
 
 # -----------------------------
