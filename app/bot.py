@@ -4,8 +4,9 @@ from fastapi import FastAPI, Request
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import Update
 from dotenv import load_dotenv
+import aiohttp
+import random
 from aiogram import F
-from aiogram.utils import executor  # Correct import for Aiogram v3.x
 
 # -----------------------------
 # Load environment variables
@@ -38,6 +39,10 @@ app = FastAPI()
 # -----------------------------
 # Database Setup
 # -----------------------------
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy.orm import sessionmaker
+from app.database import Base, RaffleEntry
+
 engine = create_async_engine(DATABASE_URL, echo=False)
 async_session = sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
@@ -206,7 +211,8 @@ async def main():
     logger.info("🎯 Starting MegaWin Raffle Bot...")
 
     from aiogram import executor
-    await executor.start_webhook(dp, on_startup=on_startup, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
+    # In Aiogram v3.x, we directly use FastAPI with a custom webhook dispatcher setup
+    await dp.start_polling()
 
 if __name__ == "__main__":
     import asyncio
