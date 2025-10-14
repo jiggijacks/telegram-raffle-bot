@@ -1,25 +1,20 @@
 import os
 import logging
-import asyncio
-import aiohttp
-import random
 from fastapi import FastAPI, Request
 from aiogram import Bot, Dispatcher, types
+from aiogram.utils.executor import start_webhook  # <-- Ensure we're using webhook, not polling
 from aiogram.enums import ParseMode
 from aiogram.filters import Command
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 from app.database import Base, RaffleEntry
+from dotenv import load_dotenv
 
 # -----------------------------
-# Logging setup
+# Load environment variables
 # -----------------------------
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+load_dotenv()  # Load environment variables from .env file
 
-# -----------------------------
-# Environment Variables
-# -----------------------------
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 PAYSTACK_SECRET_KEY = os.getenv("PAYSTACK_SECRET_KEY")
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///raffle.db")
@@ -28,6 +23,12 @@ WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://your-railway-app-url.up.railway.
 
 if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN is required in environment")
+
+# -----------------------------
+# Logging setup
+# -----------------------------
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # -----------------------------
 # Initialize Telegram Bot + FastAPI
@@ -154,9 +155,13 @@ async def verify_paystack_payment(request: Request):
     event = payload.get("event")
     data = payload.get("data", {})
 
+    logger.info(f"Event: {event}, Data: {data}")
+
     if event == "charge.success" and data.get("status") == "success":
         user_id = data.get("metadata", {}).get("user_id")
         reference = data.get("reference")
+
+        logger.info(f"Payment Data - User ID: {user_id}, Reference: {reference}")
 
         if not user_id or not reference:
             logger.warning("⚠️ Webhook missing user_id or reference.")
@@ -168,6 +173,8 @@ async def verify_paystack_payment(request: Request):
             headers = {"Authorization": f"Bearer {PAYSTACK_SECRET_KEY}"}
             async with session.get(url, headers=headers) as resp:
                 verification_response = await resp.json()
+                logger.info(f"Verification Response for reference {reference}: {verification_response}")
+
                 if verification_response.get("status") == "success" and verification_response["data"]["status"] == "success":
                     # Payment verified, proceed with saving the ticket
                     async with async_session() as session:
@@ -189,25 +196,19 @@ async def verify_paystack_payment(request: Request):
     return {"status": "ok"}
 
 
+# -----------------------------
+# RUN BOT + API TOGETHER (using Webhook)
+# -----------------------------
+async def on_startup(dp):
+    webhook_url = f"https://{WEBHOOK_URL}/webhook/paystack"  # Replace with your production URL
+    await bot.set_webhook(webhook_url)
 
-# -----------------------------
-# RUN BOT + API TOGETHER
-# -----------------------------
 async def main():
-    await on_startup()
+    await on_startup(dp)
     logger.info("🎯 Starting MegaWin Raffle Bot...")
 
-    from threading import Thread
-    import uvicorn
-
-    # Run FastAPI (webhook server) in background
-    def run_api():
-        uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
-
-    Thread(target=run_api, daemon=True).start()
-
-    # Start Telegram polling
-    await dp.start_polling(bot)
+    from aiogram import executor
+    executor.start_webhook(dp, on_startup=on_startup, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
 
 if __name__ == "__main__":
     asyncio.run(main())
