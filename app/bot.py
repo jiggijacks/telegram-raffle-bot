@@ -3,9 +3,9 @@ import logging
 from fastapi import FastAPI, Request
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import Update
-from aiogram import F
 from dotenv import load_dotenv
-from aiogram.webhook import set_webhook  # Corrected import for v3.x
+from aiogram import F
+from aiogram.utils import executor  # Correct import for Aiogram v3.x
 
 # -----------------------------
 # Load environment variables
@@ -206,7 +206,8 @@ async def main():
     logger.info("🎯 Starting MegaWin Raffle Bot...")
 
     from aiogram import executor
-    executor.start_webhook(dp, on_startup=on_startup, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
+    await executor.start_webhook(dp, on_startup=on_startup, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
 
 if __name__ == "__main__":
+    import asyncio
     asyncio.run(main())
