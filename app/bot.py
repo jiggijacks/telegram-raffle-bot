@@ -5,7 +5,7 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.types import Update
 from aiogram import F
 from dotenv import load_dotenv
-from aiogram.webhook.aiohttp import webhook
+from aiogram.webhook import set_webhook  # Corrected import for v3.x
 
 # -----------------------------
 # Load environment variables
