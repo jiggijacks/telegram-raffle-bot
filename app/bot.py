@@ -5,10 +5,11 @@ from aiogram.filters import Command
 from dotenv import load_dotenv
 import aiohttp
 import random
-import asyncio
+from fastapi import FastAPI, Request
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 from app.database import Base, RaffleEntry
+import asyncio
 
 # -----------------------------
 # Load environment variables
@@ -35,6 +36,11 @@ logger = logging.getLogger(__name__)
 # -----------------------------
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
+
+# -----------------------------
+# FastAPI App Setup
+# -----------------------------
+app = FastAPI()
 
 # -----------------------------
 # Database Setup
