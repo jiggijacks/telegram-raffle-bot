@@ -1,12 +1,14 @@
 import os
 import logging
-from fastapi import FastAPI, Request
 from aiogram import Bot, Dispatcher, types
-from aiogram.types import Update
+from aiogram.filters import Command
 from dotenv import load_dotenv
 import aiohttp
 import random
-from aiogram.filters import Command  # Import Command filter from aiogram.filters
+import asyncio
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy.orm import sessionmaker
+from app.database import Base, RaffleEntry
 
 # -----------------------------
 # Load environment variables
@@ -17,7 +19,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 PAYSTACK_SECRET_KEY = os.getenv("PAYSTACK_SECRET_KEY")
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///raffle.db")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
-WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://your-railway-app-url.up.railway.app/webhook/paystack")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://megawinraffle.up.railway.app")
 
 if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN is required in environment")
@@ -29,20 +31,14 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # -----------------------------
-# Initialize Telegram Bot + FastAPI
+# Initialize Telegram Bot + Dispatcher
 # -----------------------------
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-app = FastAPI()
-
 # -----------------------------
 # Database Setup
 # -----------------------------
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import sessionmaker
-from app.database import Base, RaffleEntry
-
 engine = create_async_engine(DATABASE_URL, echo=False)
 async_session = sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
@@ -93,7 +89,7 @@ async def cmd_buy(message: types.Message):
         data = {
             "email": f"user_{message.from_user.id}@megawinraffle.com",
             "amount": 500 * 100,  # 500 NGN
-            "callback_url": WEBHOOK_URL,
+            "callback_url": f"{WEBHOOK_URL}/webhook/paystack",  # Live callback URL
             "metadata": {"user_id": message.from_user.id},
         }
         async with session.post(url, headers=headers, json=data) as resp:
@@ -158,13 +154,9 @@ async def verify_paystack_payment(request: Request):
     event = payload.get("event")
     data = payload.get("data", {})
 
-    logger.info(f"Event: {event}, Data: {data}")
-
     if event == "charge.success" and data.get("status") == "success":
         user_id = data.get("metadata", {}).get("user_id")
         reference = data.get("reference")
-
-        logger.info(f"Payment Data - User ID: {user_id}, Reference: {reference}")
 
         if not user_id or not reference:
             logger.warning("⚠️ Webhook missing user_id or reference.")
@@ -176,8 +168,6 @@ async def verify_paystack_payment(request: Request):
             headers = {"Authorization": f"Bearer {PAYSTACK_SECRET_KEY}"}
             async with session.get(url, headers=headers) as resp:
                 verification_response = await resp.json()
-                logger.info(f"Verification Response for reference {reference}: {verification_response}")
-
                 if verification_response.get("status") == "success" and verification_response["data"]["status"] == "success":
                     # Payment verified, proceed with saving the ticket
                     async with async_session() as session:
@@ -200,18 +190,11 @@ async def verify_paystack_payment(request: Request):
 
 
 # -----------------------------
-# RUN BOT + API TOGETHER (using Webhook)
+# Run Bot (Polling)
 # -----------------------------
-async def on_startup(dp):
-    webhook_url = f"https://{WEBHOOK_URL}/webhook/paystack"  # Replace with your production URL
-    await bot.set_webhook(webhook_url)
-
 async def main():
-    await on_startup(dp)
     logger.info("🎯 Starting MegaWin Raffle Bot...")
-
-    from aiogram import executor
-    # In Aiogram v3.x, we directly use FastAPI with a custom webhook dispatcher setup
+    # Start Polling for commands
     await dp.start_polling()
 
 if __name__ == "__main__":
