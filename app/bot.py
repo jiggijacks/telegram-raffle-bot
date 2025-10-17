@@ -1,11 +1,10 @@
 import os
 import logging
 from aiogram import Bot, Dispatcher, types
-from aiogram.filters import Command
+from aiogram.filters import Text
 from dotenv import load_dotenv
 import aiohttp
 import random
-from fastapi import FastAPI, Request
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 from app.database import Base, RaffleEntry
@@ -38,11 +37,6 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
 # -----------------------------
-# FastAPI App Setup
-# -----------------------------
-app = FastAPI()
-
-# -----------------------------
 # Database Setup
 # -----------------------------
 engine = create_async_engine(DATABASE_URL, echo=False)
@@ -56,7 +50,7 @@ async def on_startup():
 # -----------------------------
 # Telegram Commands
 # -----------------------------
-@dp.message(Command("start"))
+@dp.message(Text(commands=["start"]))
 async def cmd_start(message: types.Message):
     welcome_text = (
         "🎉 <b>Welcome to MegaWin Raffle Bot!</b>\n\n"
@@ -69,7 +63,7 @@ async def cmd_start(message: types.Message):
     await message.answer(welcome_text)
 
 
-@dp.message(Command("help"))
+@dp.message(Text(commands=["help"]))
 async def cmd_help(message: types.Message):
     help_text = (
         "🧭 <b>How to Use MegaWin Raffle Bot</b>\n\n"
@@ -84,7 +78,7 @@ async def cmd_help(message: types.Message):
     await message.answer(help_text)
 
 
-@dp.message(Command("buy"))
+@dp.message(Text(commands=["buy"]))
 async def cmd_buy(message: types.Message):
     async with aiohttp.ClientSession() as session:
         url = "https://api.paystack.co/transaction/initialize"
@@ -113,7 +107,7 @@ async def cmd_buy(message: types.Message):
                 await message.answer("❌ Payment initialization failed. Please try again later.")
 
 
-@dp.message(Command("ticket"))
+@dp.message(Text(commands=["ticket"]))
 async def cmd_ticket(message: types.Message):
     async with async_session() as session:
         result = await session.execute(
@@ -131,7 +125,7 @@ async def cmd_ticket(message: types.Message):
             await message.answer("🚫 You don't have any active tickets.\nUse /buy to get one!")
 
 
-@dp.message(Command("winners"))
+@dp.message(Text(commands=["winners"]))
 async def cmd_winners(message: types.Message):
     if message.from_user.id != ADMIN_ID:
         return await message.answer("🚫 Only the admin can use this command.")
@@ -147,52 +141,6 @@ async def cmd_winners(message: types.Message):
             f"User ID: <code>{winner.user_id}</code>\n"
             f"Ticket ID: <b>{winner.id}</b>\n\n🎉 Congratulations!"
         )
-
-
-# -----------------------------
-# PAYSTACK WEBHOOK ENDPOINT
-# -----------------------------
-@app.post("/webhook/paystack")
-async def verify_paystack_payment(request: Request):
-    payload = await request.json()
-    logger.info(f"📩 Paystack Webhook Received: {payload}")
-
-    event = payload.get("event")
-    data = payload.get("data", {})
-
-    if event == "charge.success" and data.get("status") == "success":
-        user_id = data.get("metadata", {}).get("user_id")
-        reference = data.get("reference")
-
-        if not user_id or not reference:
-            logger.warning("⚠️ Webhook missing user_id or reference.")
-            return {"status": "error"}
-
-        # Verify payment reference with Paystack API
-        async with aiohttp.ClientSession() as session:
-            url = f"https://api.paystack.co/transaction/verify/{reference}"
-            headers = {"Authorization": f"Bearer {PAYSTACK_SECRET_KEY}"}
-            async with session.get(url, headers=headers) as resp:
-                verification_response = await resp.json()
-                if verification_response.get("status") == "success" and verification_response["data"]["status"] == "success":
-                    # Payment verified, proceed with saving the ticket
-                    async with async_session() as session:
-                        entry = RaffleEntry(user_id=user_id, payment_ref=reference)
-                        session.add(entry)
-                        await session.commit()
-
-                    # Notify user on Telegram
-                    try:
-                        await bot.send_message(
-                            chat_id=user_id,
-                            text="✅ Payment confirmed! Your raffle ticket has been added. Good luck! 🍀",
-                        )
-                    except Exception as e:
-                        logger.error(f"❌ Failed to message user {user_id}: {e}")
-                else:
-                    logger.warning(f"Payment reference {reference} verification failed.")
-
-    return {"status": "ok"}
 
 
 # -----------------------------
