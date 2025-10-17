@@ -1,7 +1,7 @@
 import os
 import logging
 from aiogram import Bot, Dispatcher, types
-from aiogram.filters import Text
+from aiogram.filters import Command  # Correct import for Aiogram v3.x
 from dotenv import load_dotenv
 import aiohttp
 import random
@@ -50,7 +50,7 @@ async def on_startup():
 # -----------------------------
 # Telegram Commands
 # -----------------------------
-@dp.message(Text(commands=["start"]))
+@dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     welcome_text = (
         "🎉 <b>Welcome to MegaWin Raffle Bot!</b>\n\n"
@@ -63,7 +63,7 @@ async def cmd_start(message: types.Message):
     await message.answer(welcome_text)
 
 
-@dp.message(Text(commands=["help"]))
+@dp.message(Command("help"))
 async def cmd_help(message: types.Message):
     help_text = (
         "🧭 <b>How to Use MegaWin Raffle Bot</b>\n\n"
@@ -78,7 +78,7 @@ async def cmd_help(message: types.Message):
     await message.answer(help_text)
 
 
-@dp.message(Text(commands=["buy"]))
+@dp.message(Command("buy"))
 async def cmd_buy(message: types.Message):
     async with aiohttp.ClientSession() as session:
         url = "https://api.paystack.co/transaction/initialize"
@@ -107,7 +107,7 @@ async def cmd_buy(message: types.Message):
                 await message.answer("❌ Payment initialization failed. Please try again later.")
 
 
-@dp.message(Text(commands=["ticket"]))
+@dp.message(Command("ticket"))
 async def cmd_ticket(message: types.Message):
     async with async_session() as session:
         result = await session.execute(
@@ -125,7 +125,7 @@ async def cmd_ticket(message: types.Message):
             await message.answer("🚫 You don't have any active tickets.\nUse /buy to get one!")
 
 
-@dp.message(Text(commands=["winners"]))
+@dp.message(Command("winners"))
 async def cmd_winners(message: types.Message):
     if message.from_user.id != ADMIN_ID:
         return await message.answer("🚫 Only the admin can use this command.")
