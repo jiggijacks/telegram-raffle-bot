@@ -1,29 +1,33 @@
-import datetime
-from sqlalchemy import Column, Integer, String, DateTime
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import declarative_base, sessionmaker
 import os
+import logging
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy.orm import sessionmaker
+from app.models import Base  # Import Base from models.py
 
-# Get database URL (defaults to local SQLite)
+# -----------------------------
+# Logging setup
+# -----------------------------
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# -----------------------------
+# Database Configuration
+# -----------------------------
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///raffle.db")
 
-# Create Base model class
-Base = declarative_base()
-
-# Define RaffleEntry model
-class RaffleEntry(Base):
-    __tablename__ = "raffle_entries"
-
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, nullable=False)
-    username = Column(String, nullable=True)
-    timestamp = Column(DateTime, default=datetime.datetime.utcnow)
-
-# Create async database engine
+# Async SQLAlchemy Engine
 engine = create_async_engine(DATABASE_URL, echo=False)
-async_session = sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
-# Utility function to initialize DB
+# Session factory for async interactions
+async_session = sessionmaker(
+    engine, expire_on_commit=False, class_=AsyncSession
+)
+
+# -----------------------------
+# Initialize Database
+# -----------------------------
 async def init_db():
+    """Create all database tables asynchronously."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    logger.info("✅ Database tables created successfully.")
