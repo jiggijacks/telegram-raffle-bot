@@ -159,6 +159,7 @@ async def cmd_ticket(message: types.Message):
 
 
 # -----------------------------
+# -----------------------------
 # PAYSTACK WEBHOOK ENDPOINT
 # -----------------------------
 @app.post("/webhook/paystack")
@@ -177,44 +178,53 @@ async def verify_paystack_payment(request: Request):
             logger.warning("⚠️ Webhook missing user_id or reference.")
             return {"status": "error"}
 
-        # Verify payment reference with Paystack API
-        async with aiohttp.ClientSession() as session_http:
+        # Verify payment with Paystack API
+        async with aiohttp.ClientSession() as session:
             url = f"https://api.paystack.co/transaction/verify/{reference}"
             headers = {"Authorization": f"Bearer {PAYSTACK_SECRET_KEY}"}
-            async with session_http.get(url, headers=headers) as resp:
+            async with session.get(url, headers=headers) as resp:
                 verification_response = await resp.json()
                 if (
                     verification_response.get("status") == "success"
                     and verification_response["data"]["status"] == "success"
                 ):
-                    async with async_session() as session:
+                    # Add raffle entry
+                    async with async_session() as db:
                         entry = RaffleEntry(user_id=user_id, payment_ref=reference)
-                        session.add(entry)
-                        await session.commit()
+                        db.add(entry)
+                        await db.commit()
 
-                    # Notify user on Telegram
+                    # Notify user
                     try:
                         await bot.send_message(
                             chat_id=user_id,
                             text="✅ Payment confirmed! Your raffle ticket has been added. Good luck! 🍀",
                         )
                     except Exception as e:
-                        logger.error(f"❌ Failed to message user {user_id}: {e}")
+                        logger.error(f"❌ Failed to notify user {user_id}: {e}")
                 else:
-                    logger.warning(f"Payment reference {reference} verification failed.")
+                    logger.warning(f"Payment verification failed for {reference}")
 
     return {"status": "ok"}
 
 
 # -----------------------------
-# RUN BOT + API TOGETHER
+# RUN BOT + FASTAPI TOGETHER
 # -----------------------------
+async def on_startup():
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    logger.info("✅ Database initialized successfully.")
+
+
 async def main():
     await on_startup()
     logger.info("🎯 Starting MegaWin Raffle Bot...")
 
     import uvicorn
+    from threading import Thread
 
+    # Run FastAPI (webhook server) in background
     def run_api():
         uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
 
