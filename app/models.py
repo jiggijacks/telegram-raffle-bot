@@ -1,63 +1,43 @@
-# app/models.py
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Boolean, Numeric, Text
-from sqlalchemy.orm import relationship
-from sqlalchemy.sql import func
-from .db import Base
+import datetime
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, ForeignKey
+from sqlalchemy.orm import relationship, declarative_base
 
+# Base model for all tables
+Base = declarative_base()
+
+# -----------------------------
+# USER MODEL
+# -----------------------------
 class User(Base):
     __tablename__ = "users"
+
     id = Column(Integer, primary_key=True, index=True)
-    tg_user_id = Column(String, unique=True, index=True)
+    telegram_id = Column(Integer, unique=True, nullable=False)
     username = Column(String, nullable=True)
-    first_name = Column(String, nullable=True)
-    last_name = Column(String, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    referral_count = Column(Integer, default=0)
+    referred_by = Column(Integer, ForeignKey("users.telegram_id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
-    payments = relationship("Payment", back_populates="user")
-    entries = relationship("Entry", back_populates="user")
+    # Relationship to raffle entries
+    tickets = relationship("RaffleEntry", back_populates="user", cascade="all, delete-orphan")
 
-class Payment(Base):
-    __tablename__ = "payments"
+    def __repr__(self):
+        return f"<User(id={self.id}, telegram_id={self.telegram_id}, username='{self.username}')>"
+
+# -----------------------------
+# RAFFLE ENTRY MODEL
+# -----------------------------
+class RaffleEntry(Base):
+    __tablename__ = "raffle_entries"
+
     id = Column(Integer, primary_key=True, index=True)
-    provider = Column(String)
-    provider_ref = Column(String, unique=True, index=True)
-    amount = Column(Numeric(12,2))
-    currency = Column(String, default="NGN")
-    status = Column(String)
-    raw = Column(Text)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    payment_ref = Column(String, unique=True, nullable=True)
+    free_ticket = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
-    user = relationship("User", back_populates="payments")
+    # Relationship to user
+    user = relationship("User", back_populates="tickets")
 
-class Raffle(Base):
-    __tablename__ = "raffles"
-    id = Column(Integer, primary_key=True, index=True)
-    title = Column(String, default="Manual Draw")
-    prize = Column(String, default="Prize")
-    is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    ended_at = Column(DateTime(timezone=True), nullable=True)
-
-    entries = relationship("Entry", back_populates="raffle")
-    winners = relationship("Winner", back_populates="raffle")
-
-class Entry(Base):
-    __tablename__ = "entries"
-    id = Column(Integer, primary_key=True, index=True)
-    raffle_id = Column(Integer, ForeignKey("raffles.id"))
-    user_id = Column(Integer, ForeignKey("users.id"))
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-    raffle = relationship("Raffle", back_populates="entries")
-    user = relationship("User", back_populates="entries")
-
-class Winner(Base):
-    __tablename__ = "winners"
-    id = Column(Integer, primary_key=True, index=True)
-    raffle_id = Column(Integer, ForeignKey("raffles.id"))
-    user_id = Column(Integer, ForeignKey("users.id"))
-    position = Column(Integer, default=1)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-    raffle = relationship("Raffle", back_populates="winners")
+    def __repr__(self):
+        return f"<RaffleEntry(id={self.id}, user_id={self.user_id}, free_ticket={self.free_ticket})>"
