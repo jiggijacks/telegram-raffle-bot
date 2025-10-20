@@ -7,6 +7,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
 from aiogram.filters import Command, CommandStart
 from aiogram import types
+from aiogram.types import Message
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 from app.database import Base, RaffleEntry
