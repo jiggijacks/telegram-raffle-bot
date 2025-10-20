@@ -3,14 +3,14 @@ import logging
 import random
 import asyncio
 import aiohttp
-from threading import Thread
 from fastapi import FastAPI, Request
 from aiogram import Bot, Dispatcher, types
+from aiogram.enums import ParseMode
 from aiogram.filters import Command
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 from app.database import Base, User, RaffleEntry
+from app.models import User as ModelsUser
 
 # -----------------------------
 # Logging setup
@@ -31,11 +31,15 @@ if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN is required in environment")
 
 # -----------------------------
-# Initialize Telegram Bot + FastAPI
+# Initialize Bot, Dispatcher & FastAPI
 # -----------------------------
-bot = Bot(token=BOT_TOKEN, parse_mode="HTML")
-dp = Dispatcher()
+bot = Bot(
+    token=BOT_TOKEN,
+    default=types.DefaultBotProperties(parse_mode=ParseMode.HTML)
+)
+dp = Dispatcher()  # ✅ Fixed for Aiogram v3
 app = FastAPI()
+
 
 # -----------------------------
 # Database Setup
