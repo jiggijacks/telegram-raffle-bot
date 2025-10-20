@@ -34,7 +34,7 @@ if not BOT_TOKEN:
 # Initialize Telegram Bot + FastAPI
 # -----------------------------
 bot = Bot(token=BOT_TOKEN, parse_mode="HTML")
-dp = Dispatcher(bot)
+dp = Dispatcher()
 app = FastAPI()
 
 # -----------------------------
@@ -217,7 +217,7 @@ async def main():
     Thread(target=run_api, daemon=True).start()
 
     # Start Telegram polling
-    await dp.start_polling()
+    await dp.start_polling(bot)
 
 
 if __name__ == "__main__":
