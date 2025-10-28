@@ -294,29 +294,37 @@ async def telegram_webhook(request: Request):
 # ---------------------------------------------------------
 # MAIN ENTRY (WEBHOOK ONLY)
 # ---------------------------------------------------------
+# -----------------------
+# START BOTH API + BOT (WEBHOOK MODE)
+# -----------------------
 async def main():
     await init_db()
     logger.info("✅ Database initialized")
 
-    # Webhook mode for Railway
-    await bot.delete_webhook(drop_pending_updates=True)
-    await bot.set_webhook(url=WEBHOOK_URL, allowed_updates=["message", "callback_query"])
-    logger.info(f"🌐 Webhook set to {WEBHOOK_URL}")
+    try:
+        await bot.delete_webhook(drop_pending_updates=True)
+        await bot.set_webhook(
+            url="https://megawinraffle.up.railway.app/webhook/telegram",
+            allowed_updates=["message", "callback_query"],
+        )
+        logger.info("✅ Webhook set successfully at /webhook/telegram")
+    except Exception as e:
+        logger.error(f"❌ Failed to set webhook: {e}")
 
-    # Set bot commands
-    await bot.set_my_commands([
-        BotCommand(command="start", description="Start / referral link"),
-        BotCommand(command="help", description="How to play"),
-        BotCommand(command="buy", description="Buy a raffle ticket"),
-        BotCommand(command="ticket", description="View your tickets"),
-        BotCommand(command="referrals", description="Your referral count"),
-        BotCommand(command="winners", description="Pick a winner (admin)"),
-        BotCommand(command="stats", description="Platform stats (admin)"),
-    ])
+    logger.info("🌐 Running on Railway (Webhook mode only)")
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
 
-    # Run FastAPI app (webhook server)
-    logger.info("🚀 Running on Railway Webhook mode...")
-    uvicorn.run(app, host="0.0.0.0", port=PORT)
+
+@app.post("/webhook/telegram")
+async def telegram_webhook(request: Request):
+    try:
+        data = await request.json()
+        await dp.feed_update(bot, data)
+        return {"status": "ok"}
+    except Exception as e:
+        logger.error(f"❌ Telegram webhook error: {e}")
+        return {"status": "error", "message": str(e)}
 
 
 if __name__ == "__main__":
