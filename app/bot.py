@@ -328,4 +328,27 @@ async def telegram_webhook(request: Request):
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    import uvicorn
+
+    async def start_webhook():
+        await init_db()
+        logging.info("✅ Database initialized")
+
+        try:
+            await bot.delete_webhook(drop_pending_updates=True)
+            await bot.set_webhook(
+                url="https://megawinraffle.up.railway.app/webhook/telegram",
+                allowed_updates=["message", "callback_query"],
+            )
+            logging.info("✅ Webhook set successfully!")
+        except Exception as e:
+            logging.error(f"❌ Failed to set webhook: {e}")
+
+        # Just run uvicorn directly — no asyncio.run() here
+        uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
+
+    # Run the async startup correctly inside event loop
+    import asyncio
+    asyncio.get_event_loop().run_until_complete(start_webhook())
+
+
